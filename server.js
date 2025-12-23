@@ -84,7 +84,7 @@ app.post('/create-checkout', async (req, res) => {
         // In production, upload to S3/Cloudinary first
         
         const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
+            // Auto-enables Apple Pay, Google Pay, Link, cards
             line_items: [{
                 price_data: {
                     currency: 'usd',
