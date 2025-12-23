@@ -28,9 +28,41 @@ app.use((req, res, next) => {
 
 // Product catalog - Prodigi SKUs
 const PRODUCTS = {
+    // === KEEPSAKES (Entry Level) ===
+    'postcard-set': {
+        name: 'Postcard Set (6 cards)',
+        price: 2500, // $25
+        prodigi_sku: 'GLOBAL-PHO-4x6-PRO',
+        quantity: 6,
+        description: '6 premium photo postcards'
+    },
+    'mini-print': {
+        name: 'Mini Art Print 5×7"',
+        price: 1800, // $18
+        prodigi_sku: 'GLOBAL-PHO-5x7-PRO'
+    },
+    
+    // === POSTERS (Glossy/Matte - No Frame) ===
+    'poster-8x10': {
+        name: 'Glossy Photo Print 8×10"',
+        price: 2900, // $29
+        prodigi_sku: 'GLOBAL-PHO-8x10-PRO'
+    },
+    'poster-11x14': {
+        name: 'Glossy Photo Print 11×14"',
+        price: 3900, // $39
+        prodigi_sku: 'GLOBAL-PHO-11x14-PRO'
+    },
+    'poster-18x24': {
+        name: 'Fine Art Poster 18×24"',
+        price: 5500, // $55
+        prodigi_sku: 'GLOBAL-FAP-18x24'
+    },
+    
+    // === STANDARD FRAMED ===
     'standard-8x10': {
         name: 'Standard Giclée 8×10" Framed',
-        price: 12500, // cents
+        price: 12500, // $125
         prodigi_sku: 'GLOBAL-FAP-8x10',
         frame_sku: 'GLOBAL-CFPM-8x10-BK'
     },
@@ -40,6 +72,8 @@ const PRODUCTS = {
         prodigi_sku: 'GLOBAL-FAP-16x20',
         frame_sku: 'GLOBAL-CFPM-16x20-BK'
     },
+    
+    // === GALLERY GOLD FRAMED ===
     'gallery-16x20': {
         name: 'Gallery Giclée + Gold Frame 16×20"',
         price: 35000,
@@ -52,6 +86,8 @@ const PRODUCTS = {
         prodigi_sku: 'GLOBAL-FAP-24x36',
         frame_sku: 'GLOBAL-AFPM-24x36-GD'
     },
+    
+    // === COLLECTOR METAL ===
     'collector-16': {
         name: 'Collector Metal Print 16×16"',
         price: 39500,
@@ -62,6 +98,8 @@ const PRODUCTS = {
         price: 59500,
         prodigi_sku: 'GLOBAL-ALU-24x24'
     },
+    
+    // === MUSEUM ===
     'museum-24x36': {
         name: 'Museum Giclée + Ornate Frame 24×36"',
         price: 85000,
