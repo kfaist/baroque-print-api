@@ -1,7 +1,7 @@
 {
   "name": "baroque-print-api",
   "version": "1.0.0",
-  "description": "Automated print ordering - Stripe + Prodigi",
+  "description": "Baroque print API - Updated 2025-12-23 10:56",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -13,3 +13,4 @@
     "node-fetch": "^2.7.0"
   }
 }
+
