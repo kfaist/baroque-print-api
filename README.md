@@ -2,6 +2,8 @@
 
 Automated print ordering with Stripe + Prodigi integration.
 
+Last deployed: December 23, 2025
+
 ## Environment Variables (set in Railway)
 
 ```
