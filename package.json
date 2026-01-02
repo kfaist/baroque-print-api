@@ -1,7 +1,7 @@
 {
   "name": "baroque-print-api",
   "version": "1.0.0",
-  "description": "Baroque print API - Updated 2025-12-23 10:56",
+  "description": "Baroque print API - Updated 2026-01-02 16:00",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
