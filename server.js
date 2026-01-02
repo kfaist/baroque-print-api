@@ -118,9 +118,6 @@ app.post('/create-checkout', async (req, res) => {
             return res.status(400).json({ error: 'Invalid product' });
         }
 
-        // Store image temporarily (we'll retrieve it after payment)
-        // In production, upload to S3/Cloudinary first
-        
         const session = await stripe.checkout.sessions.create({
             // Auto-enables Apple Pay, Google Pay, Link, cards
             line_items: [{
@@ -140,12 +137,15 @@ app.post('/create-checkout', async (req, res) => {
                 allowed_countries: ['US', 'CA', 'GB', 'AU', 'DE', 'FR', 'IT', 'ES', 'NL', 'BE']
             },
             metadata: {
-                productId: productId,
-                imageData: imageData.substring(0, 500) // Store reference, not full image
+                productId: productId
             },
             success_url: `${returnUrl}?success=true&session_id={CHECKOUT_SESSION_ID}`,
             cancel_url: `${returnUrl}?canceled=true`
         });
+
+        // Store image by SESSION ID (not orderId)
+        pendingOrders.set(session.id, imageData);
+        console.log('Stored image for session:', session.id);
 
         res.json({ sessionId: session.id, url: session.url });
     } catch (err) {
@@ -154,19 +154,8 @@ app.post('/create-checkout', async (req, res) => {
     }
 });
 
-// Store pending orders (in production, use a database)
+// Store pending orders (in production, use Redis or database)
 const pendingOrders = new Map();
-
-// Save image for order
-app.post('/save-image', async (req, res) => {
-    try {
-        const { orderId, imageData } = req.body;
-        pendingOrders.set(orderId, imageData);
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
 
 // Stripe webhook
 app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
@@ -198,15 +187,42 @@ async function fulfillOrder(session) {
         const product = PRODUCTS[productId];
         const shipping = session.shipping_details;
         
+        console.log('Fulfilling order for session:', session.id);
+        console.log('Product:', productId, product?.name);
+        console.log('Shipping to:', shipping?.name, shipping?.address?.city);
+        
         // Get stored image
         const imageData = pendingOrders.get(session.id);
         
         if (!imageData) {
-            console.error('No image found for order:', session.id);
+            console.error('No image found for session:', session.id);
+            console.error('Available sessions:', Array.from(pendingOrders.keys()));
             return;
         }
 
-        // Create Prodigi order
+        console.log('Image data found, length:', imageData.length);
+
+        // First, upload image to Prodigi
+        const uploadResponse = await fetch('https://api.prodigi.com/v4.0/assets', {
+            method: 'POST',
+            headers: {
+                'X-API-Key': process.env.PRODIGI_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                file: imageData // Base64 data URL
+            })
+        });
+
+        const uploadResult = await uploadResponse.json();
+        console.log('Prodigi upload result:', uploadResult);
+
+        if (!uploadResult.id) {
+            console.error('Failed to upload image to Prodigi:', uploadResult);
+            return;
+        }
+
+        // Create Prodigi order with uploaded asset
         const prodigiOrder = {
             shippingMethod: 'Standard',
             recipient: {
@@ -221,19 +237,16 @@ async function fulfillOrder(session) {
                 }
             },
             items: [{
-                sku: product.prodigi_sku,
-                copies: 1,
+                sku: product.frame_sku || product.prodigi_sku,
+                copies: product.quantity || 1,
                 assets: [{
                     printArea: 'default',
-                    url: imageData // Base64 or URL
+                    id: uploadResult.id
                 }]
             }]
         };
 
-        // Add frame if product has one
-        if (product.frame_sku) {
-            prodigiOrder.items[0].sku = product.frame_sku;
-        }
+        console.log('Creating Prodigi order:', JSON.stringify(prodigiOrder, null, 2));
 
         const response = await fetch('https://api.prodigi.com/v4.0/Orders', {
             method: 'POST',
@@ -245,7 +258,13 @@ async function fulfillOrder(session) {
         });
 
         const result = await response.json();
-        console.log('Prodigi order created:', result);
+        console.log('Prodigi order result:', JSON.stringify(result, null, 2));
+
+        if (result.id) {
+            console.log('✅ Prodigi order created successfully:', result.id);
+        } else {
+            console.error('❌ Prodigi order failed:', result);
+        }
 
         // Clean up
         pendingOrders.delete(session.id);
