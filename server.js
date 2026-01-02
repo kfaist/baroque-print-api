@@ -28,41 +28,35 @@ app.use((req, res, next) => {
 
 // Product catalog - Prodigi SKUs
 const PRODUCTS = {
-    // === KEEPSAKES (Entry Level) ===
     'postcard-set': {
         name: 'Postcard Set (6 cards)',
-        price: 2500, // $25
+        price: 2500,
         prodigi_sku: 'GLOBAL-PHO-4x6-PRO',
-        quantity: 6,
-        description: '6 premium photo postcards'
+        quantity: 6
     },
     'mini-print': {
         name: 'Mini Art Print 5×7"',
-        price: 1800, // $18
+        price: 1800,
         prodigi_sku: 'GLOBAL-PHO-5x7-PRO'
     },
-    
-    // === POSTERS (Glossy/Matte - No Frame) ===
     'poster-8x10': {
         name: 'Glossy Photo Print 8×10"',
-        price: 2900, // $29
+        price: 2900,
         prodigi_sku: 'GLOBAL-PHO-8x10-PRO'
     },
     'poster-11x14': {
         name: 'Glossy Photo Print 11×14"',
-        price: 3900, // $39
+        price: 3900,
         prodigi_sku: 'GLOBAL-PHO-11x14-PRO'
     },
     'poster-18x24': {
         name: 'Fine Art Poster 18×24"',
-        price: 5500, // $55
+        price: 5500,
         prodigi_sku: 'GLOBAL-FAP-18x24'
     },
-    
-    // === STANDARD FRAMED ===
     'standard-8x10': {
         name: 'Standard Giclée 8×10" Framed',
-        price: 12500, // $125
+        price: 12500,
         prodigi_sku: 'GLOBAL-FAP-8x10',
         frame_sku: 'GLOBAL-CFPM-8x10-BK'
     },
@@ -72,8 +66,6 @@ const PRODUCTS = {
         prodigi_sku: 'GLOBAL-FAP-16x20',
         frame_sku: 'GLOBAL-CFPM-16x20-BK'
     },
-    
-    // === GALLERY GOLD FRAMED ===
     'gallery-16x20': {
         name: 'Gallery Giclée + Gold Frame 16×20"',
         price: 35000,
@@ -86,8 +78,6 @@ const PRODUCTS = {
         prodigi_sku: 'GLOBAL-FAP-24x36',
         frame_sku: 'GLOBAL-AFPM-24x36-GD'
     },
-    
-    // === COLLECTOR METAL ===
     'collector-16': {
         name: 'Collector Metal Print 16×16"',
         price: 39500,
@@ -98,8 +88,6 @@ const PRODUCTS = {
         price: 59500,
         prodigi_sku: 'GLOBAL-ALU-24x24'
     },
-    
-    // === MUSEUM ===
     'museum-24x36': {
         name: 'Museum Giclée + Ornate Frame 24×36"',
         price: 85000,
@@ -108,7 +96,7 @@ const PRODUCTS = {
     }
 };
 
-// Create checkout session
+// Create checkout session - UPLOAD IMAGE FIRST
 app.post('/create-checkout', async (req, res) => {
     try {
         const { productId, imageData, returnUrl } = req.body;
@@ -118,8 +106,33 @@ app.post('/create-checkout', async (req, res) => {
             return res.status(400).json({ error: 'Invalid product' });
         }
 
+        if (!imageData) {
+            return res.status(400).json({ error: 'No image data provided' });
+        }
+
+        console.log('Creating checkout for:', productId);
+        console.log('Image data length:', imageData.length);
+
+        // STEP 1: Upload image to Prodigi FIRST (before checkout)
+        const uploadResponse = await fetch('https://api.prodigi.com/v4.0/assets', {
+            method: 'POST',
+            headers: {
+                'X-API-Key': process.env.PRODIGI_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ file: imageData })
+        });
+
+        const uploadResult = await uploadResponse.json();
+        console.log('Prodigi asset upload:', uploadResult);
+
+        if (!uploadResult.id) {
+            console.error('Failed to upload to Prodigi:', uploadResult);
+            return res.status(500).json({ error: 'Failed to prepare image for printing' });
+        }
+
+        // STEP 2: Create Stripe checkout with Prodigi asset ID in metadata
         const session = await stripe.checkout.sessions.create({
-            // Auto-enables Apple Pay, Google Pay, Link, cards
             line_items: [{
                 price_data: {
                     currency: 'usd',
@@ -137,25 +150,21 @@ app.post('/create-checkout', async (req, res) => {
                 allowed_countries: ['US', 'CA', 'GB', 'AU', 'DE', 'FR', 'IT', 'ES', 'NL', 'BE']
             },
             metadata: {
-                productId: productId
+                productId: productId,
+                prodigiAssetId: uploadResult.id  // Store asset ID in metadata!
             },
             success_url: `${returnUrl}?success=true&session_id={CHECKOUT_SESSION_ID}`,
             cancel_url: `${returnUrl}?canceled=true`
         });
 
-        // Store image by SESSION ID (not orderId)
-        pendingOrders.set(session.id, imageData);
-        console.log('Stored image for session:', session.id);
-
+        console.log('Checkout created:', session.id, 'with asset:', uploadResult.id);
         res.json({ sessionId: session.id, url: session.url });
+
     } catch (err) {
         console.error('Checkout error:', err);
         res.status(500).json({ error: err.message });
     }
 });
-
-// Store pending orders (in production, use Redis or database)
-const pendingOrders = new Map();
 
 // Stripe webhook
 app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
@@ -183,46 +192,27 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 
 async function fulfillOrder(session) {
     try {
-        const productId = session.metadata.productId;
+        const { productId, prodigiAssetId } = session.metadata;
         const product = PRODUCTS[productId];
         const shipping = session.shipping_details;
         
-        console.log('Fulfilling order for session:', session.id);
-        console.log('Product:', productId, product?.name);
-        console.log('Shipping to:', shipping?.name, shipping?.address?.city);
-        
-        // Get stored image
-        const imageData = pendingOrders.get(session.id);
-        
-        if (!imageData) {
-            console.error('No image found for session:', session.id);
-            console.error('Available sessions:', Array.from(pendingOrders.keys()));
+        console.log('=== FULFILLING ORDER ===');
+        console.log('Session:', session.id);
+        console.log('Product:', productId);
+        console.log('Prodigi Asset ID:', prodigiAssetId);
+        console.log('Ship to:', shipping?.name, shipping?.address?.city);
+
+        if (!prodigiAssetId) {
+            console.error('❌ No Prodigi asset ID in metadata!');
             return;
         }
 
-        console.log('Image data found, length:', imageData.length);
-
-        // First, upload image to Prodigi
-        const uploadResponse = await fetch('https://api.prodigi.com/v4.0/assets', {
-            method: 'POST',
-            headers: {
-                'X-API-Key': process.env.PRODIGI_API_KEY,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                file: imageData // Base64 data URL
-            })
-        });
-
-        const uploadResult = await uploadResponse.json();
-        console.log('Prodigi upload result:', uploadResult);
-
-        if (!uploadResult.id) {
-            console.error('Failed to upload image to Prodigi:', uploadResult);
+        if (!product) {
+            console.error('❌ Unknown product:', productId);
             return;
         }
 
-        // Create Prodigi order with uploaded asset
+        // Create Prodigi order using the pre-uploaded asset
         const prodigiOrder = {
             shippingMethod: 'Standard',
             recipient: {
@@ -241,12 +231,12 @@ async function fulfillOrder(session) {
                 copies: product.quantity || 1,
                 assets: [{
                     printArea: 'default',
-                    id: uploadResult.id
+                    id: prodigiAssetId
                 }]
             }]
         };
 
-        console.log('Creating Prodigi order:', JSON.stringify(prodigiOrder, null, 2));
+        console.log('Sending to Prodigi:', JSON.stringify(prodigiOrder, null, 2));
 
         const response = await fetch('https://api.prodigi.com/v4.0/Orders', {
             method: 'POST',
@@ -258,33 +248,28 @@ async function fulfillOrder(session) {
         });
 
         const result = await response.json();
-        console.log('Prodigi order result:', JSON.stringify(result, null, 2));
-
+        
         if (result.id) {
-            console.log('✅ Prodigi order created successfully:', result.id);
+            console.log('✅ PRODIGI ORDER CREATED:', result.id);
         } else {
-            console.error('❌ Prodigi order failed:', result);
+            console.error('❌ PRODIGI ORDER FAILED:', JSON.stringify(result));
         }
 
-        // Clean up
-        pendingOrders.delete(session.id);
-
     } catch (err) {
-        console.error('Fulfillment error:', err);
+        console.error('❌ Fulfillment error:', err);
     }
 }
 
 // Health check
 app.get('/', (req, res) => {
     res.json({ 
-        status: 'Baroque Print API running', 
+        status: 'Baroque Print API v2 - Pre-upload flow', 
         products: Object.keys(PRODUCTS),
         config: {
             stripe: !!process.env.STRIPE_SECRET_KEY,
             webhook: !!process.env.STRIPE_WEBHOOK_SECRET,
             prodigi: !!process.env.PRODIGI_API_KEY
-        },
-        pendingOrders: pendingOrders.size
+        }
     });
 });
 
@@ -300,5 +285,5 @@ app.get('/products', (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-    console.log(`Baroque Print API running on port ${PORT}`);
+    console.log(`Baroque Print API v2 running on port ${PORT}`);
 });
