@@ -219,7 +219,8 @@ async function fulfillOrder(session) {
     try {
         const { productId, imageUrl } = session.metadata;
         const product = PRODUCTS[productId];
-        const shipping = session.shipping_details;
+        // Handle both old and new Stripe API structures
+        const shipping = session.shipping_details || session.collected_information?.shipping_details;
         
         console.log('=== FULFILLING ORDER ===');
         console.log('Session:', session.id);
@@ -234,6 +235,11 @@ async function fulfillOrder(session) {
 
         if (!product) {
             console.error('❌ Unknown product:', productId);
+            return;
+        }
+
+        if (!shipping || !shipping.address) {
+            console.error('❌ No shipping address! Session:', JSON.stringify(session, null, 2));
             return;
         }
 
