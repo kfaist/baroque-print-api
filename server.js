@@ -276,7 +276,16 @@ async function fulfillOrder(session) {
 
 // Health check
 app.get('/', (req, res) => {
-    res.json({ status: 'Baroque Print API running', products: Object.keys(PRODUCTS) });
+    res.json({ 
+        status: 'Baroque Print API running', 
+        products: Object.keys(PRODUCTS),
+        config: {
+            stripe: !!process.env.STRIPE_SECRET_KEY,
+            webhook: !!process.env.STRIPE_WEBHOOK_SECRET,
+            prodigi: !!process.env.PRODIGI_API_KEY
+        },
+        pendingOrders: pendingOrders.size
+    });
 });
 
 // Get products
