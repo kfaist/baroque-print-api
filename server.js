@@ -6,6 +6,15 @@ const fetch = require('node-fetch');
 const app = express();
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
+// TEST MODE: Set TEST_MODE=true in Railway to use Prodigi sandbox
+const TEST_MODE = process.env.TEST_MODE === 'true';
+const PRODIGI_BASE = TEST_MODE 
+    ? 'https://api.sandbox.prodigi.com/v4.0'
+    : 'https://api.prodigi.com/v4.0';
+
+console.log(`Running in ${TEST_MODE ? 'TEST' : 'LIVE'} mode`);
+console.log(`Prodigi endpoint: ${PRODIGI_BASE}`);
+
 // CORS for your Railway apps
 app.use(cors({
     origin: [
@@ -114,7 +123,7 @@ app.post('/create-checkout', async (req, res) => {
         console.log('Image data length:', imageData.length);
 
         // STEP 1: Upload image to Prodigi FIRST (before checkout)
-        const uploadResponse = await fetch('https://api.prodigi.com/v4.0/assets', {
+        const uploadResponse = await fetch(`${PRODIGI_BASE}/assets`, {
             method: 'POST',
             headers: {
                 'X-API-Key': process.env.PRODIGI_API_KEY,
@@ -151,7 +160,7 @@ app.post('/create-checkout', async (req, res) => {
             },
             metadata: {
                 productId: productId,
-                prodigiAssetId: uploadResult.id  // Store asset ID in metadata!
+                prodigiAssetId: uploadResult.id
             },
             success_url: `${returnUrl}?success=true&session_id={CHECKOUT_SESSION_ID}`,
             cancel_url: `${returnUrl}?canceled=true`
@@ -238,7 +247,7 @@ async function fulfillOrder(session) {
 
         console.log('Sending to Prodigi:', JSON.stringify(prodigiOrder, null, 2));
 
-        const response = await fetch('https://api.prodigi.com/v4.0/Orders', {
+        const response = await fetch(`${PRODIGI_BASE}/Orders`, {
             method: 'POST',
             headers: {
                 'X-API-Key': process.env.PRODIGI_API_KEY,
@@ -263,7 +272,9 @@ async function fulfillOrder(session) {
 // Health check
 app.get('/', (req, res) => {
     res.json({ 
-        status: 'Baroque Print API v2 - Pre-upload flow', 
+        status: 'Baroque Print API v2', 
+        mode: TEST_MODE ? 'TEST (sandbox)' : 'LIVE',
+        prodigi_endpoint: PRODIGI_BASE,
         products: Object.keys(PRODUCTS),
         config: {
             stripe: !!process.env.STRIPE_SECRET_KEY,
