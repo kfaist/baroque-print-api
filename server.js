@@ -364,5 +364,5 @@ app.get('/products', (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-    console.log(`Baroque Print API v4 running on port ${PORT}`);
+    console.log(`Baroque Print API v4.1 running on port ${PORT}`);
 });
