@@ -3,6 +3,7 @@ const cors = require('cors');
 const Stripe = require('stripe');
 const fetch = require('node-fetch');
 const FormData = require('form-data');
+const crypto = require('crypto');
 
 const app = express();
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
@@ -94,13 +95,13 @@ const PRODUCTS = {
     'collector-16': {
         name: 'Collector Metal Print 16×16"',
         price: 39500,
-        prodigi_sku: 'GLOBAL-ALU-16x16',
+        prodigi_sku: 'GLOBAL-MET-16x16',
         attributes: {}
     },
     'collector-24': {
         name: 'Collector Metal Print 24×24"',
         price: 59500,
-        prodigi_sku: 'GLOBAL-ALU-24x24',
+        prodigi_sku: 'GLOBAL-MET-24x24',
         attributes: {}
     },
     'museum-24x36': {
@@ -112,9 +113,48 @@ const PRODUCTS = {
     }
 };
 
-// Upload image to imgBB and get URL
+// Upload image to Cloudinary (more reliable than imgBB)
+async function uploadToCloudinary(base64Data) {
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const apiKey = process.env.CLOUDINARY_API_KEY;
+    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+    
+    // If Cloudinary not configured, fall back to imgBB
+    if (!cloudName || !apiKey || !apiSecret) {
+        console.log('Cloudinary not configured, trying imgBB...');
+        return uploadToImgBB(base64Data);
+    }
+    
+    const timestamp = Math.floor(Date.now() / 1000);
+    const folder = 'baroque-prints';
+    
+    // Generate signature
+    const signatureString = `folder=${folder}&timestamp=${timestamp}${apiSecret}`;
+    const signature = crypto.createHash('sha1').update(signatureString).digest('hex');
+    
+    const formData = new FormData();
+    formData.append('file', base64Data);
+    formData.append('timestamp', timestamp);
+    formData.append('folder', folder);
+    formData.append('api_key', apiKey);
+    formData.append('signature', signature);
+    
+    const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+        method: 'POST',
+        body: formData
+    });
+    
+    const result = await response.json();
+    console.log('Cloudinary upload:', result.secure_url ? 'SUCCESS' : result);
+    
+    if (result.secure_url) {
+        return result.secure_url;
+    }
+    throw new Error('Cloudinary upload failed: ' + JSON.stringify(result));
+}
+
+// Fallback: Upload to imgBB
 async function uploadToImgBB(base64Data) {
-    // Strip data URL prefix if present
     const base64Only = base64Data.replace(/^data:image\/\w+;base64,/, '');
     
     const formData = new FormData();
@@ -125,8 +165,13 @@ async function uploadToImgBB(base64Data) {
         body: formData
     });
     
-    const result = await response.json();
-    console.log('imgBB upload result:', result.success ? 'SUCCESS' : result);
+    const text = await response.text();
+    let result;
+    try {
+        result = JSON.parse(text);
+    } catch (e) {
+        throw new Error('imgBB returned invalid JSON: ' + text.substring(0, 200));
+    }
     
     if (result.success) {
         return result.data.url;
@@ -151,12 +196,12 @@ app.post('/create-checkout', async (req, res) => {
         console.log('Creating checkout for:', productId);
         console.log('Image data length:', imageData.length);
 
-        // STEP 1: Upload image to imgBB to get a URL
-        console.log('Uploading to imgBB...');
-        const imageUrl = await uploadToImgBB(imageData);
+        // Upload image to get a URL
+        console.log('Uploading image...');
+        const imageUrl = await uploadToCloudinary(imageData);
         console.log('Image URL:', imageUrl);
 
-        // STEP 2: Create Stripe checkout with image URL in metadata
+        // Create Stripe checkout
         const session = await stripe.checkout.sessions.create({
             line_items: [{
                 price_data: {
@@ -176,7 +221,7 @@ app.post('/create-checkout', async (req, res) => {
             },
             metadata: {
                 productId: productId,
-                imageUrl: imageUrl  // Store URL, not base64!
+                imageUrl: imageUrl
             },
             success_url: `${returnUrl}?success=true&session_id={CHECKOUT_SESSION_ID}`,
             cancel_url: `${returnUrl}?canceled=true`
@@ -219,7 +264,6 @@ async function fulfillOrder(session) {
     try {
         const { productId, imageUrl } = session.metadata;
         const product = PRODUCTS[productId];
-        // Handle both old and new Stripe API structures
         const shipping = session.shipping_details || session.collected_information?.shipping_details;
         
         console.log('=== FULFILLING ORDER ===');
@@ -239,11 +283,11 @@ async function fulfillOrder(session) {
         }
 
         if (!shipping || !shipping.address) {
-            console.error('❌ No shipping address! Session:', JSON.stringify(session, null, 2));
+            console.error('❌ No shipping address!');
             return;
         }
 
-        // Create Prodigi order with image URL
+        // Create Prodigi order
         const prodigiOrder = {
             shippingMethod: 'Standard',
             recipient: {
@@ -264,7 +308,7 @@ async function fulfillOrder(session) {
                 attributes: product.attributes || {},
                 assets: [{
                     printArea: 'default',
-                    url: imageUrl  // Prodigi fetches from URL
+                    url: imageUrl
                 }]
             }]
         };
@@ -296,12 +340,13 @@ async function fulfillOrder(session) {
 // Health check
 app.get('/', (req, res) => {
     res.json({ 
-        status: 'Baroque Print API v3 (imgBB)', 
+        status: 'Baroque Print API v4 (Cloudinary)', 
         products: Object.keys(PRODUCTS),
         config: {
             stripe: !!process.env.STRIPE_SECRET_KEY,
             webhook: !!process.env.STRIPE_WEBHOOK_SECRET,
             prodigi: !!process.env.PRODIGI_API_KEY,
+            cloudinary: !!(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY),
             imgbb: !!process.env.IMGBB_API_KEY
         }
     });
@@ -319,5 +364,5 @@ app.get('/products', (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-    console.log(`Baroque Print API v3 running on port ${PORT}`);
+    console.log(`Baroque Print API v4 running on port ${PORT}`);
 });
