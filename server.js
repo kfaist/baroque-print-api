@@ -47,7 +47,7 @@ const PRODUCTS = {
     },
     'poster-8x10': {
         name: 'Glossy Photo Print 8×10"',
-        price: 2900,
+        price: 4900,
         prodigi_sku: 'GLOBAL-PHO-8x10-PRO',
         attributes: { finish: 'gloss' }
     },
